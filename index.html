@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Return Firewall Calculation V2.5                                               — produced by Neil H.</title>
+  <title>Return Firewall Calculation V2.8 — produced by Neil H.</title>
   <!-- Correctly load Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -26,6 +26,15 @@
     .chart-wrapper{position:relative;height:300px;width:100%;overflow:hidden;background:#fff;border:1px solid #eee;}
     .sim-wrapper{height:450px;}
     .matrix-view{overflow-x:auto;max-height:250px;border:1px solid #eee;margin-top:5px;background:#fafafa;}
+    
+    /* Matrix Output Table Styles */
+    .matrix-output-container { margin-top:20px; overflow-x:auto; border:1px solid #ddd; background:#fff; }
+    table.result-matrix { width:100%; border-collapse:collapse; font-family:monospace; font-size:12px; }
+    table.result-matrix th, table.result-matrix td { border:1px solid #ddd; padding:6px 8px; text-align:right; white-space:nowrap; }
+    table.result-matrix th { background:#f1f3f5; font-weight:bold; text-align:center; position:sticky; top:0; z-index:10; }
+    table.result-matrix td:first-child { background:#f8f9fa; font-weight:bold; position:sticky; left:0; z-index:11; border-right:2px solid #ddd; }
+    table.result-matrix tr:hover td { background-color:#f1faff; }
+
     table.matrix{border-collapse:collapse;width:100%;font-size:11px;font-family:monospace;}
     table.matrix td, table.matrix th{border:1px solid #ddd;padding:4px 6px;text-align:center;white-space:nowrap;}
     table.matrix th{background:#e9ecef;position:sticky;top:0;z-index:5;}
@@ -40,7 +49,7 @@
 <body>
 <div class="container">
   <div style="margin-bottom:10px;">
-    <h1>Return Firewall Calculation V2.3 <span class="subtitle">— produced by Neil H.</span></h1>
+    <h1>Return Firewall Calculation V2.8 <span class="subtitle">— produced by Neil H. </span></h1>
   </div>
 
   <!-- 1. File Import -->
@@ -97,12 +106,21 @@
         <input type="number" id="simOffset" value="0.2" step="0.1" />
       </div>
       <div>
-        <button onclick="runSafeSim()">★ Start Calculation</button>
-        <button style="margin-left:8px;" onclick="runAllSpeedSim()">★ Full‑Speed‑Range Calculation</button>
+        <!-- MERGED BUTTON -->
+        <button onclick="runCombinedSim()" style="min-width: 200px;">★ Run All Calculations</button>
       </div>
     </div>
     <div style="margin-top:15px;" class="chart-wrapper sim-wrapper" id="cont_sim"></div>
     <div style="margin-top:15px;" class="chart-wrapper sim-wrapper" id="cont_sim_all"></div>
+    
+    <!-- Matrix Result Section -->
+    <div style="margin-top:20px;">
+        <h4>Firewall Upper Matrix Preview (Copyable)</h4>
+        <div id="matrixOutput" class="matrix-output-container">
+            <div style="padding:10px; color:#666; font-style:italic;">Run "Run All Calculations" to generate matrix...</div>
+        </div>
+    </div>
+
     <div style="text-align:right;margin-top:10px;">
       <button class="export" onclick="exportCSV()">Export (CSV)</button>
     </div>
@@ -124,7 +142,10 @@ function log(msg){
   el.scrollTop = el.scrollHeight;
 }
 
-/* ========== Core Variable Map (unchanged) ========== */
+/* ========== Constants ========== */
+const FIXED_FWL_ANGLES = [-500, -105, -50, -20, -2, 0, 2, 20, 50, 105, 500];
+
+/* ========== Core Variable Map ========== */
 const CORE_VARS = [
   "SysGlbPrmSysTqRat",
   "CtrldVelRtnHwPosnScaY",
@@ -149,7 +170,7 @@ const MAP_KEYS = {
 let rawDataStore={}, activeData={}, lastSimResults=[];
 let lastAllSpeedUpper=[]; // [{speed: Number, pairs:[{angle:Number, upper:Number}...]}]
 
-/* ========== 日期格式化 (YYYYMMDD，本地时区) ========== */
+/* ========== 日期格式化 (YYYYMMDD) ========== */
 function formatDateYYYYMMDD(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -158,25 +179,19 @@ function formatDateYYYYMMDD(d = new Date()) {
 }
 
 /* ========== File Import & Parse ========== */
-// 支持 .scp：虚拟改名为 .txt 并按文本读取
 document.getElementById('fileInput').addEventListener('change',(e)=>{
   let f = e.target.files[0]; if(!f) return;
-
   if(/\.(scp)$/i.test(f.name)) {
     log(`Detected .scp file: ${f.name} — will treat as .txt for parsing.`);
     const newName = f.name.replace(/\.(scp)$/i, '.txt');
     try {
       f = new File([f], newName, {type:'text/plain', lastModified:f.lastModified});
-      log(`Renamed virtually to: ${newName}`);
-    } catch (err) {
-      log(`Virtual rename not supported; reading as text directly.`);
-    }
+    } catch (err) { }
   }
-
   log(`Start reading: ${f.name}`);
   const r=new FileReader();
   r.onload=ev=>parseContent(ev.target.result);
-  r.readAsText(f); // 统一按文本读取
+  r.readAsText(f); 
 });
 
 function parseContent(txt){
@@ -216,7 +231,7 @@ function parseContent(txt){
   }
 }
 function parseByFallback(text){
-  log("No valid XML structure detected, TXT fallback skipped (XML export is recommended).");
+  log("No valid XML structure detected, TXT fallback skipped.");
 }
 function parseValueStrict(str){
   if(!str) return 0;
@@ -245,7 +260,6 @@ function updateSetSelect(){
 }
 function renderUI(){
   const curSet=document.getElementById('setSelect').value;
-  log(`Switching to group: ${curSet}`);
   activeData={};
   const sets=Object.keys(rawDataStore);
   const common=sets.find(s=>s==="Common")||"Common";
@@ -262,7 +276,6 @@ function renderUI(){
     const v=activeData[k];
     if(Array.isArray(v)&&Array.isArray(v[0])) activeData[k]=transpose2D(v);
   });
-  log('2D matrix transpose performed for DesVelX / DesVelY / IntgtrLimY (if needed).');
   renderMatrixView();
   renderCharts();
 }
@@ -305,7 +318,6 @@ function renderCharts(){
   else { createChart('cont_desvel', activeData[MAP_KEYS.desVelY], ang, spd); }
   createChartVsSpeed('cont_gain', spd, activeData[MAP_KEYS.gain], 'Prop Gain');
   createChartVsSpeed('cont_limit', spd, activeData[MAP_KEYS.limit], 'Cmd Limit (check only)');
-  log('X‑axis of Prop Gain and Cmd Limit fixed to vehicle speed.');
 }
 function createChart(containerId, yData, xData, legendData){
   const container=document.getElementById(containerId); container.innerHTML="";
@@ -320,7 +332,7 @@ function createChart(containerId, yData, xData, legendData){
     .sort((a,b)=>a.x-b.x);
   if(isY2D && (isX2D || Array.isArray(xData))){
     const rows=yData.length, cols=yData[0].length;
-    if(!spd || cols!==spd.length){ log('Desired Velocity plotting failed: column count does not match speed axis.'); return; }
+    if(!spd || cols!==spd.length){ return; }
     for(let c=0;c<cols;c++){
       const xCol=[], yCol=[];
       for(let r=0;r<rows;r++){
@@ -339,18 +351,16 @@ function createChart(containerId, yData, xData, legendData){
     }
   }else if(isY2D && !isX2D){
     const rows=yData.length, cols=yData[0].length; const X=xData;
-    if(!spd || cols!==spd.length || X.length!==rows){ log('Desired Velocity plotting failed: columns = speed points but x length = rows.'); return; }
+    if(!spd || cols!==spd.length || X.length!==rows){ return; }
     for(let c=0;c<cols;c++){
       const xCol=X.slice(0,rows); const yCol=yData.map(row=>row[c]);
       const pairs=xCol.map((xv,i)=>({x:xv,y:yCol[i]})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)).sort((a,b)=>a.x-b.x);
       const label=`${spd[c]}kph`;
       datasets.push({label, data:pairs, borderColor:`hsl(${(c/cols)*240},70%,50%)`, borderWidth:1.5, pointRadius:0});
     }
-  }else{ log('Desired Velocity plotting failed: unsupported data dimension.'); return; }
-
+  }
   new Chart(canvas.getContext('2d'),{
-    type:'line',
-    data:{datasets},
+    type:'line', data:{datasets},
     options:{
       responsive:true, maintainAspectRatio:false, animation:false,
       plugins:{legend:{display:true, position:'bottom'}, title:{display:false}},
@@ -407,7 +417,108 @@ function interp1(x,y,xi){
   const r=(xi-x[i])/(x[i+1]-x[i]); return y[i] + r*(y[i+1]-y[i]);
 }
 
-/* ========== Simulation Chart (Final Cmd + Upper) ========== */
+/* ========== Calculation Logic ========== */
+// Calculate Firewall for a SINGLE point (Specific Speed, Specific Angle)
+// Reuses the symmetric logic
+function getSinglePointFirewall(simSpd, angle, offset) {
+    const spdAxis = activeData[MAP_KEYS.spd];
+    const desVelX = activeData[MAP_KEYS.desVelX];
+    const desVelY = activeData[MAP_KEYS.desVelY];
+    const gainRaw = activeData[MAP_KEYS.gain];
+    const tqRat = activeData["SysGlbPrmSysTqRat"] ?? 1.0;
+    const intLim2D = activeData['CtrldVelRtnIntgtrLimY'];
+    const hwPosScaX = activeData['CtrldVelRtnHwPosnScaX'];
+    const hwPosScaY = activeData['CtrldVelRtnHwPosnScaY'];
+    const spdOld = activeData['CtrldVelRtnVehSpdScaBilnrSeln'];
+
+    // 1. Base Return Curve
+    const curSpdXVector = interpolateVectorBySpeed(spdAxis, desVelX, simSpd);
+    const curSpdYVector = interpolateVectorBySpeed(spdAxis, desVelY, simSpd);
+    const curGain = interp1(spdAxis, gainRaw, simSpd);
+    
+    // Symmetric Lookup
+    const absAg = Math.abs(angle);
+    const rawVal = interp1(curSpdXVector, curSpdYVector, absAg);
+    const sign = (angle < 0) ? -1 : 1;
+    const pVal = rawVal * curGain * sign;
+
+    // 2. Integral Limit Curve
+    let iVal = 0;
+    const Ns = Array.isArray(spdOld) ? spdOld.length : 0;
+    const Na = Array.isArray(hwPosScaX) ? hwPosScaX.length : 0;
+    
+    if (isValid(intLim2D) && Na>0 && Ns>0 && isValid(hwPosScaY)) {
+        let mat=intLim2D;
+        let r=mat.length, c=(Array.isArray(mat[0])? mat[0].length:0);
+        if(!(r===Ns && c===Na)){ if(r===Na && c===Ns){ mat=transpose2D(mat); r=mat.length; c=mat[0].length; } }
+        
+        if(r===Ns && c===Na){
+            let iVecRaw=null;
+            if(simSpd<=spdOld[0]) iVecRaw=mat[0].slice();
+            else if(simSpd>=spdOld[Ns-1]) iVecRaw=mat[Ns-1].slice();
+            else{
+                let k=0; while(k<Ns-1 && simSpd>spdOld[k+1]) k++;
+                const rr=(simSpd-spdOld[k])/(spdOld[k+1]-spdOld[k]);
+                iVecRaw=mat[k].map((v1,j)=> v1 + rr*(mat[k+1][j]-v1));
+            }
+            if(iVecRaw && iVecRaw.length===Na){
+                const iScaled=iVecRaw.map((v,idx)=> v*hwPosScaY[idx]);
+                // Symmetric Integral Limit
+                const rawLim = interp1(hwPosScaX, iScaled, absAg);
+                iVal = rawLim * sign;
+            }
+        }
+    }
+
+    const cmdRaw = pVal + iVal;
+    const cmd = cmdRaw / tqRat;
+    
+    // MODIFIED: Symmetric Outer Bound Logic
+    // Positive Axis: Cmd + Offset
+    // Negative Axis: Cmd - Offset (Because Cmd is negative, we want the "outer" side)
+    return cmd + (offset * sign);
+}
+
+// Calculate Firewall for a whole range (for Plotting)
+function computeFirewallCurve(simSpd, offset) {
+  const spdAxis = activeData[MAP_KEYS.spd];
+  const desVelX = activeData[MAP_KEYS.desVelX];
+  let absMaxAg = 0;
+  if (Array.isArray(desVelX[0])) {
+    const allEnds = desVelX.map(r => Math.max(Math.abs(r[0]), Math.abs(r[r.length-1])));
+    absMaxAg = Math.max(...allEnds);
+  } else {
+    absMaxAg = Math.max(Math.abs(desVelX[0]), Math.abs(desVelX[desVelX.length-1]));
+  }
+  if(absMaxAg === 0) absMaxAg = 550;
+
+  const stdAgAxis = [];
+  const points = 200;
+  const step = (absMaxAg * 2) / points;
+  for (let i=0; i<=points; i++) {
+    stdAgAxis.push(-absMaxAg + step*i);
+  }
+  const results = stdAgAxis.map(ag => {
+      const up = getSinglePointFirewall(simSpd, ag, offset);
+      // For visual "Upper" line vs "Command" line
+      // Cmd curve is simple physics symmetric (Odd)
+      // Firewall curve is now symmetric Outer Bounds (Odd + Jump at 0)
+      
+      // Re-calculate pure command for plotting comparison
+      // (This is redundant but clean for separation)
+      // Ideally we would return cmd from getSinglePointFirewall too, but this is fine for now
+      // Let's just assume cmd = up - (offset*sign)
+      const sign = (ag < 0) ? -1 : 1;
+      const cmd = up - (offset * sign);
+      
+      return { x:ag, cmd:cmd, up:up };
+  });
+  // Get gain just for logging
+  const gain = interp1(spdAxis, activeData[MAP_KEYS.gain], simSpd);
+  return { results, curGain:gain };
+}
+
+/* ========== Charting & Execution ========== */
 function drawSimChart(data, spd){
   const container=document.getElementById('cont_sim'); container.innerHTML="";
   const canvas=document.createElement('canvas'); container.appendChild(canvas);
@@ -416,7 +527,7 @@ function drawSimChart(data, spd){
     data:{
       datasets:[
         {label:'Final Cmd', data:data.map(d=>({x:d.x,y:d.cmd})), borderColor:'#0d6efd', borderWidth:2, pointRadius:0},
-        {label:'Firewall', data:data.map(d=>({x:d.x,y:d.up })), borderColor:'#dc3545', borderDash:[5,5], borderWidth:1, pointRadius:0}
+        {label:'Firewall (Outer)', data:data.map(d=>({x:d.x,y:d.up })), borderColor:'#dc3545', borderDash:[5,5], borderWidth:1, pointRadius:0}
       ]
     },
     options:{
@@ -428,77 +539,6 @@ function drawSimChart(data, spd){
   });
 }
 
-/* ========== Compute firewall at a single speed ========== */
-function computeFirewallAtSpeed(simSpd, offset) {
-  const spdAxis = activeData[MAP_KEYS.spd];
-  const desVelX = activeData[MAP_KEYS.desVelX];
-  const desVelY = activeData[MAP_KEYS.desVelY];
-  const gainRaw = activeData[MAP_KEYS.gain];
-  const tqRat = activeData["SysGlbPrmSysTqRat"] ?? 1.0;
-  const intLim2D = activeData['CtrldVelRtnIntgtrLimY'];
-  const hwPosScaX= activeData['CtrldVelRtnHwPosnScaX'];
-  const hwPosScaY= activeData['CtrldVelRtnHwPosnScaY'];
-  const spdOld = activeData['CtrldVelRtnVehSpdScaBilnrSeln'];
-
-  if(!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
-  if(!isValid(desVelX) || !isValid(desVelY)) throw new Error('Missing DesVelX or DesVelY');
-
-  let minAg=0, maxAg=0;
-  if (Array.isArray(desVelX[0])) {
-    minAg = Math.min(...desVelX.map(r => r[0]));
-    maxAg = Math.max(...desVelX.map(r => r[r.length-1]));
-  } else {
-    minAg = desVelX[0];
-    maxAg = desVelX[desVelX.length-1];
-  }
-  const stdAgAxis = [];
-  const step = (maxAg - minAg) / 100;
-  for (let i=0;i<=100;i++) stdAgAxis.push(minAg + step*i);
-
-  const curSpdXVector = interpolateVectorBySpeed(spdAxis, desVelX, simSpd);
-  const curSpdYVector = interpolateVectorBySpeed(spdAxis, desVelY, simSpd);
-  const desCurve = stdAgAxis.map(ag => interp1(curSpdXVector, curSpdYVector, ag));
-  const curGain = interp1(spdAxis, gainRaw, simSpd);
-  const pCurve = desCurve.map(v => v * curGain);
-
-  let iCurve = new Array(stdAgAxis.length).fill(0);
-  const Ns = Array.isArray(spdOld) ? spdOld.length : 0;
-  const Na = Array.isArray(hwPosScaX) ? hwPosScaX.length : 0;
-  if (isValid(intLim2D) && Na>0 && Ns>0 && isValid(hwPosScaY)) {
-    let mat=intLim2D;
-    let r=mat.length, c=(Array.isArray(mat[0])? mat[0].length:0);
-    if(!(r===Ns && c===Na)){
-      if(r===Na && c===Ns){ mat=transpose2D(mat); r=mat.length; c=mat[0].length; }
-    }
-    if(r===Ns && c===Na){
-      let iVecRaw=null;
-      if(simSpd<=spdOld[0]) iVecRaw=mat[0].slice();
-      else if(simSpd>=spdOld[Ns-1]) iVecRaw=mat[Ns-1].slice();
-      else{
-        let k=0; while(k<Ns-1 && simSpd>spdOld[k+1]) k++;
-        const rr=(simSpd-spdOld[k])/(spdOld[k+1]-spdOld[k]);
-        const row1=mat[k], row2=mat[k+1];
-        iVecRaw=row1.map((v1,j)=> v1 + rr*(row2[j]-v1));
-      }
-      if(iVecRaw && iVecRaw.length===Na){
-        if(hwPosScaY.length===Na){
-          const iScaled=iVecRaw.map((v,idx)=> v*hwPosScaY[idx]);
-          iCurve=stdAgAxis.map(ag=> interp1(hwPosScaX, iScaled, ag));
-        }
-      }
-    }
-  }
-
-  const results=[];
-  for(let i=0;i<stdAgAxis.length;i++){
-    const cmdRaw = pCurve[i] + iCurve[i];
-    const cmd = cmdRaw / (tqRat || 1.0);
-    results.push({ x:Number(stdAgAxis[i]), cmd:Number(cmd), up:Number(cmd + offset) });
-  }
-  return { stdAgAxis, results, curGain };
-}
-
-/* ========== Full-speed combined plot ========== */
 function drawMultiSimChart(datasets, titleText){
   const container = document.getElementById('cont_sim_all');
   container.innerHTML = "";
@@ -518,6 +558,38 @@ function drawMultiSimChart(datasets, titleText){
   });
 }
 
+// Generates the Matrix Table HTML
+function renderMatrixOutput(spdAxis, matrixData) {
+    const div = document.getElementById('matrixOutput');
+    if(!div) return;
+
+    let html = `<table class="result-matrix"><thead><tr>`;
+    html += `<th>Angle \\ Speed</th>`;
+    spdAxis.forEach(s => { html += `<th>${s} kph</th>`; });
+    html += `</tr></thead><tbody>`;
+
+    FIXED_FWL_ANGLES.forEach((angle, rIdx) => {
+        html += `<tr><td>${angle} deg</td>`;
+        spdAxis.forEach((s, cIdx) => {
+             // matrixData[cIdx] is column for speed s
+             // matrixData[cIdx][rIdx] is value for angle
+             const val = matrixData[cIdx][rIdx];
+             html += `<td>${val.toFixed(4)}</td>`;
+        });
+        html += `</tr>`;
+    });
+    html += `</tbody></table>`;
+    div.innerHTML = html;
+}
+
+/* ========== New Combined Function ========== */
+function runCombinedSim() {
+  log("— Batch: Starting All Calculations —");
+  runSafeSim();
+  runAllSpeedSim();
+  log("— Batch: All Calculations Finished —");
+}
+
 function runAllSpeedSim(){
   try{
     log("— Full‑Speed‑Range Calculation Started —");
@@ -525,11 +597,18 @@ function runAllSpeedSim(){
     if (!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
     const offset = parseFloat(document.getElementById('simOffset').value);
 
-    lastAllSpeedUpper = []; // reset & fill
+    lastAllSpeedUpper = []; 
     const datasets = [];
-    for (let i=0;i<spdAxis.length;i++){
+    
+    // Prepare for Matrix
+    // We will store column-wise data: matrixColumns[speedIndex] = [val_angle1, val_angle2...]
+    const matrixColumns = [];
+
+    for (let i=0; i<spdAxis.length; i++){
       const s = spdAxis[i];
-      const { results } = computeFirewallAtSpeed(s, offset);
+      // 1. For Plotting (High resolution)
+      const { results } = computeFirewallCurve(s, offset);
+      
       const dataPairs = results.map(p => ({ x:p.x, y:p.up }));
       datasets.push({
         label: `${s} kph`,
@@ -538,53 +617,49 @@ function runAllSpeedSim(){
         borderWidth: 1.5,
         pointRadius: 0
       });
-      lastAllSpeedUpper.push({ speed: s, pairs: results.map(p=>({angle:p.x, upper:p.up})) });
+
+      // 2. For Matrix (Specific Angles)
+      const colValues = FIXED_FWL_ANGLES.map(ag => getSinglePointFirewall(s, ag, offset));
+      matrixColumns.push(colValues);
     }
-    drawMultiSimChart(datasets, 'Firewall (Upper) vs Angle — Full Speed Range');
-    log(`Full‑speed‑range calculation completed: ${spdAxis.length} speed point(s) processed; Upper curves plotted.`);
+    
+    // Draw Plot
+    drawMultiSimChart(datasets, 'Firewall  vs Angle & Speed — Full Speed Range ');
+    
+    // Render Matrix
+    renderMatrixOutput(spdAxis, matrixColumns);
+    
+    log(`Calculation completed. Matrix table updated below.`);
   }catch(e){
     log(`Error: ${e.message}`); alert(e.message);
   }
 }
 
-/* ========== Export CSV (多速段 Upper 曲线) ========== */
-/*
-  需求：CSV 不包含单一速度 Upper 曲线；
-       直接导出“多速段全范围 Upper 曲线”。
-  输出结构：
-    [Meta]
-    ExportDate,YYYYMMDD
-    FileTitle,Return Firewall data_YYYYMMDD
+function runSafeSim(){
+  try{
+    log("— Start Calculation (Single Speed) —");
+    const simSpd = parseFloat(document.getElementById('simSpeed').value);
+    const offset = parseFloat(document.getElementById('simOffset').value);
+    const { results, curGain } = computeFirewallCurve(simSpd, offset);
+    lastSimResults = results.slice(); 
+    drawSimChart(lastSimResults, simSpd);
+    log(`SimSpeed=${simSpd}, Gain=${curGain?.toFixed?.(3)} — Done.`);
+  }catch(e){
+    log(`Error: ${e.message}`); alert(e.message);
+  }
+}
 
-    [CoreData]
-    VarName,Value
-    ...
-
-    [FirewallResultMulti]
-    Speed(kph),Angle(deg),Upper(Nm)
-    s1, ang, up
-    s1, ang, up
-    s2, ang, up
-    ...
-*/
+/* ========== Export CSV (Matrix Format) ========== */
 function exportCSV(){
   try{
     const today = formatDateYYYYMMDD();
-    const fileTitle = `Return Firewall data_${today}`;
-
-    // 计算多速段 Upper（即使用户未手动点“Full‑Speed‑Range Calculation”，这里也自动计算，确保导出的一致性）
+    const fileTitle = `Return Firewall data_Matrix_${today}`;
     const spdAxis = activeData[MAP_KEYS.spd];
     if(!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
     const offset = parseFloat(document.getElementById('simOffset').value);
 
-    // 本地生成（同时刷新 lastAllSpeedUpper 以保持 UI 状态一致）
-    lastAllSpeedUpper = [];
-    for (let i=0;i<spdAxis.length;i++){
-      const s = spdAxis[i];
-      const { results } = computeFirewallAtSpeed(s, offset);
-      lastAllSpeedUpper.push({ speed: s, pairs: results.map(p=>({angle:p.x, upper:p.up})) });
-    }
-
+    // Re-calculate matrix for export (ensure freshness)
+    // Structure: Header = Speed points, Rows = Fixed Angles
     let c = "";
     // Meta
     c += "[Meta]\n";
@@ -603,35 +678,29 @@ function exportCSV(){
       c += `${k},${s}\n`;
     });
 
-    // 多速段 Upper 结果
+    // Matrix Output
     c += "\n[FirewallResultMulti]\n";
-    c += "Speed(kph),Angle(deg),Upper(Nm)\n";
-    lastAllSpeedUpper.forEach(row=>{
-      row.pairs.forEach(p=>{
-        c += `${row.speed},${Number(p.angle).toFixed(2)},${Number(p.upper).toFixed(4)}\n`;
-      });
+    // Header Row: Angle/Speed, 0, 10, 20... (Speeds)
+    c += "Angle/Speed," + spdAxis.join(",") + "\n";
+    
+    // Data Rows
+    FIXED_FWL_ANGLES.forEach(angle => {
+        const rowVals = [];
+        spdAxis.forEach(s => {
+            const val = getSinglePointFirewall(s, angle, offset);
+            rowVals.push(val.toFixed(4));
+        });
+        c += `${angle},${rowVals.join(",")}\n`;
     });
+
+    // Also update the UI matrix if not already there
+    // (Implicitly done by runAllSpeedSim, but if user hits Export directly, maybe we don't update UI, just CSV. That's fine.)
 
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([c],{type:'text/csv'}));
     a.download=`${fileTitle}.csv`;
     a.click();
-    log(`CSV exported with multi-speed Upper curves only: ${a.download}`);
-  }catch(e){
-    log(`Error: ${e.message}`); alert(e.message);
-  }
-}
-
-/* ========== Run calc (CALIB‑ALIGNED; Upper only) ========== */
-function runSafeSim(){
-  try{
-    log("— Start Calculation (CALIB‑ALIGNED: No unified limit; Firewall = cmd+offset; Upper only) —");
-    const simSpd = parseFloat(document.getElementById('simSpeed').value);
-    const offset = parseFloat(document.getElementById('simOffset').value);
-    const { results, curGain } = computeFirewallAtSpeed(simSpd, offset);
-    lastSimResults = results.slice();  // 仅用于单速图显示（不再写入 CSV）
-    drawSimChart(lastSimResults, simSpd);
-    log(`SimSpeed=${simSpd}, Gain=${curGain?.toFixed?.(3)} — Calculation complete (limits removed; Firewall = cmd+offset; Lower not output).`);
+    log(`CSV exported with Matrix format: ${a.download}`);
   }catch(e){
     log(`Error: ${e.message}`); alert(e.message);
   }
@@ -639,4 +708,3 @@ function runSafeSim(){
 </script>
 </body>
 </html>
-``
