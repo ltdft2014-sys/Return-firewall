@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Return Firewall Calculation V2.5                                               — produced by Neil H.</title>
+  <!-- Correctly load Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{--primary:#0d6efd;--bg:#f4f6f9;--panel:#fff;--border:#e0e0e0;}
+    *{box-sizing:border-box;}
+    body{font-family:'Segoe UI',Consolas,Arial,sans-serif;margin:0;padding:20px;background:var(--bg);color:#333;font-size:13px;}
+    .container{max-width:1600px;margin:0 auto;}
+    .panel{background:var(--panel);padding:15px;border:1px solid var(--border);border-radius:6px;margin-bottom:20px;box-shadow:0 2px 4px rgba(0,0,0,0.03);}
+    h1{margin:0 0 12px 0;color:#111;font-size:1.4rem;font-weight:700;}
+    h1 .subtitle{font-weight:500;color:#555;font-size:0.9rem;margin-left:6px;}
+    h2{margin-top:0;font-size:1.1rem;color:var(--primary);border-bottom:2px solid var(--primary);padding-bottom:8px;margin-bottom:15px;}
+    h4{margin:0 0 10px 0;color:#555;font-size:0.95rem;font-weight:600;border-left:3px solid var(--primary);padding-left:8px;}
+    .grid-header{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+    .grid-charts{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;min-width:0;}
+    .grid-calc{display:grid;grid-template-columns:120px 120px 1fr;gap:10px;align-items:end;}
+    input,select{width:100%;padding:6px;border:1px solid #ccc;border-radius:4px;}
+    button{background:var(--primary);color:#fff;border:none;padding:7px 15px;border-radius:4px;cursor:pointer;font-weight:600;transition:0.2s;white-space:nowrap;}
+    button:hover{background:#0b5ed7;}
+    button.export{background:#198754;}
+    .chart-box-outer{min-width:0;width:100%;}
+    .chart-wrapper{position:relative;height:300px;width:100%;overflow:hidden;background:#fff;border:1px solid #eee;}
+    .sim-wrapper{height:450px;}
+    .matrix-view{overflow-x:auto;max-height:250px;border:1px solid #eee;margin-top:5px;background:#fafafa;}
+    table.matrix{border-collapse:collapse;width:100%;font-size:11px;font-family:monospace;}
+    table.matrix td, table.matrix th{border:1px solid #ddd;padding:4px 6px;text-align:center;white-space:nowrap;}
+    table.matrix th{background:#e9ecef;position:sticky;top:0;z-index:5;}
+    .row-head{background:#f8f9fa;font-weight:bold;position:sticky;left:0;z-index:6;}
+    .var-block{margin-bottom:15px;border-bottom:1px dashed #eee;padding-bottom:10px;}
+    .status-ok{color:green;font-weight:bold;font-size:0.85em;}
+    .status-miss{color:red;font-weight:bold;font-size:0.85em;}
+    #debugConsole{background:#222;color:#0f0;padding:10px;height:120px;overflow-y:auto;font-family:monospace;border-radius:4px;margin-top:10px;}
+    small.hint{color:#666;}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div style="margin-bottom:10px;">
+    <h1>Return Firewall Calculation V2.3 <span class="subtitle">— produced by Neil H.</span></h1>
+  </div>
+
+  <!-- 1. File Import -->
+  <div class="panel">
+    <h2>1. Calibration Data Import</h2>
+    <div class="grid-header">
+      <div>
+        <label>Select Calibration File (.txt / .xml / .scp):</label>
+        <input type="file" id="fileInput" accept=".txt,.xml,.scp" />
+        <div id="fileStatus" style="margin-top:6px;color:#666;">Waiting for import…</div>
+      </div>
+      <div>
+        <label>Select Init Set (Rt Group):</label>
+        <select id="setSelect" onchange="renderUI()" disabled></select>
+        <div><small class="hint">Fallback order: Current Rt Group → Common → Inin00</small></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Visualization -->
+  <div class="panel">
+    <h2>2. Core Data Visualization (Data Check)</h2>
+    <div class="grid-charts">
+      <div class="chart-box-outer">
+        <h4>Desired Velocity</h4>
+        <div class="chart-wrapper" id="cont_desvel"></div>
+      </div>
+      <div class="chart-box-outer">
+        <h4>Prop Gain</h4>
+        <div class="chart-wrapper" id="cont_gain"></div>
+      </div>
+      <div class="chart-box-outer">
+        <h4>Cmd Limit</h4>
+        <div class="chart-wrapper" id="cont_limit"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <h4>Full Core Variables (Matrix View)</h4>
+      <div id="dataPreviewArea"></div>
+    </div>
+  </div>
+
+  <!-- 3. Calculation & Simulation -->
+  <div class="panel">
+    <h2>3. Firewall Calculation</h2>
+    <div class="grid-calc">
+      <div>
+        <label>Vehicle Speed (kph)</label>
+        <input type="number" id="simSpeed" value="50" />
+      </div>
+      <div>
+        <label>Offset (Nm)</label>
+        <input type="number" id="simOffset" value="0.2" step="0.1" />
+      </div>
+      <div>
+        <button onclick="runSafeSim()">★ Start Calculation</button>
+        <button style="margin-left:8px;" onclick="runAllSpeedSim()">★ Full‑Speed‑Range Calculation</button>
+      </div>
+    </div>
+    <div style="margin-top:15px;" class="chart-wrapper sim-wrapper" id="cont_sim"></div>
+    <div style="margin-top:15px;" class="chart-wrapper sim-wrapper" id="cont_sim_all"></div>
+    <div style="text-align:right;margin-top:10px;">
+      <button class="export" onclick="exportCSV()">Export (CSV)</button>
+    </div>
+  </div>
+
+  <!-- 4. Log -->
+  <div class="panel">
+    <h4>System Log</h4>
+    <div id="debugConsole">System Ready.</div>
+  </div>
+</div>
+
+<script>
+/* ========== Basic Log ========== */
+function log(msg){
+  const el=document.getElementById('debugConsole');
+  const t=new Date().toLocaleTimeString();
+  el.innerHTML += `<div>[${t}] ${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ========== Core Variable Map (unchanged) ========== */
+const CORE_VARS = [
+  "SysGlbPrmSysTqRat",
+  "CtrldVelRtnHwPosnScaY",
+  "CtrldVelRtnVehSpdScaBilnrSeln",
+  "CtrldVelRtnHwPosnScaX",
+  "CtrldVelRtnIntgtrLimY",
+  "CtrldVelRtnVelSpdTbl",
+  "CtrldVelRtnPropGain",
+  "CtrldVelRtnDesVelX",
+  "CtrldVelRtnDesVelY",
+  "CtrldVelRtnRtnCmdLimY"
+];
+const MAP_KEYS = {
+  spd: "CtrldVelRtnVelSpdTbl",
+  desVelX: "CtrldVelRtnDesVelX",
+  desVelY: "CtrldVelRtnDesVelY",
+  gain: "CtrldVelRtnPropGain",
+  limit: "CtrldVelRtnRtnCmdLimY",
+  tqRat: "SysGlbPrmSysTqRat",
+  hwPosScaX: "CtrldVelRtnHwPosnScaX"
+};
+let rawDataStore={}, activeData={}, lastSimResults=[];
+let lastAllSpeedUpper=[]; // [{speed: Number, pairs:[{angle:Number, upper:Number}...]}]
+
+/* ========== 日期格式化 (YYYYMMDD，本地时区) ========== */
+function formatDateYYYYMMDD(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+/* ========== File Import & Parse ========== */
+// 支持 .scp：虚拟改名为 .txt 并按文本读取
+document.getElementById('fileInput').addEventListener('change',(e)=>{
+  let f = e.target.files[0]; if(!f) return;
+
+  if(/\.(scp)$/i.test(f.name)) {
+    log(`Detected .scp file: ${f.name} — will treat as .txt for parsing.`);
+    const newName = f.name.replace(/\.(scp)$/i, '.txt');
+    try {
+      f = new File([f], newName, {type:'text/plain', lastModified:f.lastModified});
+      log(`Renamed virtually to: ${newName}`);
+    } catch (err) {
+      log(`Virtual rename not supported; reading as text directly.`);
+    }
+  }
+
+  log(`Start reading: ${f.name}`);
+  const r=new FileReader();
+  r.onload=ev=>parseContent(ev.target.result);
+  r.readAsText(f); // 统一按文本读取
+});
+
+function parseContent(txt){
+  try{
+    rawDataStore={};
+    const parser = new DOMParser();
+    const safeTxt = txt.replace(/&(?!amp|lt|gt|quot|apos;?)/g,"&");
+    const xml = parser.parseFromString(safeTxt,"text/xml");
+    if(xml.getElementsByTagName("parsererror").length>0){
+      parseByFallback(txt);
+      updateSetSelect();
+      return;
+    }
+    const vars = xml.getElementsByTagName("Variable");
+    let count=0;
+    for(let i=0;i<vars.length;i++){
+      const v=vars[i];
+      const name=v.getAttribute("name")||"";
+      let set=v.getAttribute("set")||"Common";
+      if(set==="") set="Common";
+      const key = CORE_VARS.find(k=>name.includes(k) || (v.getAttribute("displayName")||"").includes(k));
+      if(key){
+        let dStr="";
+        const dNode=v.getElementsByTagName("data")[0];
+        if(dNode) dStr=dNode.textContent||"";
+        dStr=dStr.replace("<![CDATA[","").replace("]]>","").trim();
+        const val=parseValueStrict(dStr);
+        if(!rawDataStore[set]) rawDataStore[set]={};
+        rawDataStore[set][key]={val:val,from:set};
+        count++;
+      }
+    }
+    log(`Extracted variables: ${count} items.`);
+    updateSetSelect();
+  }catch(e){
+    log(`Error: ${e.message}`);
+  }
+}
+function parseByFallback(text){
+  log("No valid XML structure detected, TXT fallback skipped (XML export is recommended).");
+}
+function parseValueStrict(str){
+  if(!str) return 0;
+  str=str.trim();
+  if(str.includes("{")){
+    let js=str.replace(/[\r\n]/g,"").replace(/\{/g,"[").replace(/\}/g,"]");
+    js=js.replace(/,\s*\]/g,"]");
+    try{ return JSON.parse(js); }catch(e){ return null; }
+  }
+  if(str.includes(",")) return str.split(",").map(s=>parseFloat(s)).filter(n=>!isNaN(n));
+  const n=parseFloat(str); return isNaN(n)?0:n;
+}
+function updateSetSelect(){
+  const sel=document.getElementById('setSelect');
+  sel.innerHTML="";
+  const sets=Object.keys(rawDataStore).sort();
+  const rtSets=sets.filter(s=>s.toLowerCase().startsWith("rt"));
+  if(rtSets.length>0){
+    rtSets.forEach(s=>sel.add(new Option(s,s)));
+    document.getElementById('fileStatus').innerText=`Found ${rtSets.length} Rt group(s)`;
+    sel.disabled=false;
+    renderUI();
+  }else{
+    log("No Rt group found.");
+  }
+}
+function renderUI(){
+  const curSet=document.getElementById('setSelect').value;
+  log(`Switching to group: ${curSet}`);
+  activeData={};
+  const sets=Object.keys(rawDataStore);
+  const common=sets.find(s=>s==="Common")||"Common";
+  const inin=sets.find(s=>s.toLowerCase().includes("inin"))||"Inin00";
+  CORE_VARS.forEach(k=>{
+    let val=null;
+    if(rawDataStore[curSet]?.[k]) val=rawDataStore[curSet][k].val;
+    else if(rawDataStore[common]?.[k]) val=rawDataStore[common][k].val;
+    else if(rawDataStore[inin]?.[k]) val=rawDataStore[inin][k].val;
+    activeData[k]=val;
+  });
+  const NEED_TRANSPOSE=['CtrldVelRtnIntgtrLimY','CtrldVelRtnDesVelX','CtrldVelRtnDesVelY'];
+  NEED_TRANSPOSE.forEach(k=>{
+    const v=activeData[k];
+    if(Array.isArray(v)&&Array.isArray(v[0])) activeData[k]=transpose2D(v);
+  });
+  log('2D matrix transpose performed for DesVelX / DesVelY / IntgtrLimY (if needed).');
+  renderMatrixView();
+  renderCharts();
+}
+
+/* ========== Matrix Preview ========== */
+function renderMatrixView(){
+  const div=document.getElementById('dataPreviewArea'); div.innerHTML="";
+  CORE_VARS.forEach(k=>{
+    const val=activeData[k];
+    let content="", status=val!==null?`<span class="status-ok">✔ Found</span>`:`<span class="status-miss">✘ Missing</span>`;
+    if(val!==null){
+      if(Array.isArray(val)&&Array.isArray(val[0])){
+        content = `<div class="matrix-view"><table class="matrix"><thead><tr><th class="row-head">Idx</th>`;
+        for(let i=0;i<val[0].length;i++) content+=`<th>${i}</th>`;
+        content+=`</tr></thead><tbody>`;
+        val.forEach((row,rI)=>{
+          content+=`<tr><td class="row-head">${rI}</td>`;
+          row.forEach(c=> content+=`<td>${fmt(c)}</td>`);
+          content+=`</tr>`;
+        });
+        content+=`</tbody></table></div>`;
+      }else if(Array.isArray(val)){
+        content = `<div style="font-family:monospace;padding:5px;background:#f9f9f9;">[ ${val.map(fmt).join(", ")} ]</div>`;
+      }else{
+        content = `<span style="font-weight:bold">${val}</span>`;
+      }
+    }else{
+      content = `<span style="color:#999">-</span>`;
+    }
+    div.innerHTML += `<div class="var-block"><div><strong>${k}</strong> ${status}</div>${content}</div>`;
+  });
+}
+function fmt(n){ return (Math.abs(n)<0.001 && n!==0) ? Number(n).toExponential(2) : parseFloat(Number(n).toFixed(3)); }
+
+/* ========== Charts ========== */
+function renderCharts(){
+  const spd=activeData[MAP_KEYS.spd];
+  const ang=activeData[MAP_KEYS.desVelX];
+  if(!isValid(ang)){ log('DesVelX missing: Desired Velocity plot skipped.'); }
+  else { createChart('cont_desvel', activeData[MAP_KEYS.desVelY], ang, spd); }
+  createChartVsSpeed('cont_gain', spd, activeData[MAP_KEYS.gain], 'Prop Gain');
+  createChartVsSpeed('cont_limit', spd, activeData[MAP_KEYS.limit], 'Cmd Limit (check only)');
+  log('X‑axis of Prop Gain and Cmd Limit fixed to vehicle speed.');
+}
+function createChart(containerId, yData, xData, legendData){
+  const container=document.getElementById(containerId); container.innerHTML="";
+  const canvas=document.createElement('canvas'); container.appendChild(canvas);
+  if(!isValid(yData) || !isValid(xData)) return;
+  const spd=(Array.isArray(legendData)?legendData:null);
+  let datasets=[];
+  const isY2D=Array.isArray(yData)&&Array.isArray(yData[0]);
+  const isX2D=Array.isArray(xData)&&Array.isArray(xData[0]);
+  const sortPairs=(xs,ys)=> xs.map((xv,i)=>({x:xv,y:ys[i]}))
+    .filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))
+    .sort((a,b)=>a.x-b.x);
+  if(isY2D && (isX2D || Array.isArray(xData))){
+    const rows=yData.length, cols=yData[0].length;
+    if(!spd || cols!==spd.length){ log('Desired Velocity plotting failed: column count does not match speed axis.'); return; }
+    for(let c=0;c<cols;c++){
+      const xCol=[], yCol=[];
+      for(let r=0;r<rows;r++){
+        const xv=isX2D?xData[r][c]:xData[r];
+        const yv=yData[r][c];
+        if(Number.isFinite(xv)&&Number.isFinite(yv)){ xCol.push(xv); yCol.push(yv); }
+      }
+      const pairs=sortPairs(xCol,yCol);
+      const label=`${spd[c]}kph`;
+      datasets.push({label, data:pairs, borderColor:`hsl(${(c/cols)*240},70%,50%)`, borderWidth:1.5, pointRadius:0});
+    }
+  }else if(!isY2D && !isX2D){
+    if(xData.length===yData.length){
+      const pairs=xData.map((x,i)=>({x,y:yData[i]})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)).sort((a,b)=>a.x-b.x);
+      datasets.push({label:'Curve', data:pairs, borderColor:'#0d6efd', borderWidth:2, pointRadius:0});
+    }
+  }else if(isY2D && !isX2D){
+    const rows=yData.length, cols=yData[0].length; const X=xData;
+    if(!spd || cols!==spd.length || X.length!==rows){ log('Desired Velocity plotting failed: columns = speed points but x length = rows.'); return; }
+    for(let c=0;c<cols;c++){
+      const xCol=X.slice(0,rows); const yCol=yData.map(row=>row[c]);
+      const pairs=xCol.map((xv,i)=>({x:xv,y:yCol[i]})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)).sort((a,b)=>a.x-b.x);
+      const label=`${spd[c]}kph`;
+      datasets.push({label, data:pairs, borderColor:`hsl(${(c/cols)*240},70%,50%)`, borderWidth:1.5, pointRadius:0});
+    }
+  }else{ log('Desired Velocity plotting failed: unsupported data dimension.'); return; }
+
+  new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{legend:{display:true, position:'bottom'}, title:{display:false}},
+      scales:{ x:{type:'linear', title:{display:true,text:'HwAg (deg)'}},
+               y:{title:{display:true,text:'MotNwtMtr'}}},
+      elements:{ line:{tension:0} }
+    }
+  });
+}
+function createChartVsSpeed(containerId, xArr, yArr, label){
+  const container=document.getElementById(containerId); container.innerHTML="";
+  const canvas=document.createElement('canvas'); container.appendChild(canvas);
+  if(!isValid(xArr) || !yArr) return;
+  let xs=xArr.slice(); let ys=[];
+  if(Array.isArray(yArr)){
+    if(Array.isArray(yArr[0])){
+      if(yArr.length===xs.length){ ys=yArr.map(r=>Array.isArray(r)?r[0]:r); }
+      else if(yArr[0].length===xs.length){ ys=yArr[0].slice(); }
+      else { ys=[]; }
+    }else{ ys=yArr.slice(); }
+  }else if(typeof yArr==='number'){ ys=[yArr,yArr]; xs=[xs[0], xs[xs.length-1]]; }
+  if(ys.length===0) return;
+  const dataPts=ys.map((v,i)=>({x:xs[i], y:v})).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));
+  new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{ datasets:[{ label: label||'', data:dataPts, borderColor:'#0d6efd', borderWidth:2, pointRadius:2 }]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      scales:{ x:{type:'linear', title:{display:true,text:'Speed (kph)'}},
+               y:{title:{display:true,text:label||''}} },
+      plugins:{ legend:{ display:false } }
+    }
+  });
+}
+
+/* ========== Utils ========== */
+function transpose2D(m){ if(!Array.isArray(m)||!Array.isArray(m[0])) return m; const rows=m.length, cols=m[0].length; return Array.from({length:cols},(_,j)=>Array.from({length:rows},(_,i)=>m[i][j])); }
+function isValid(a){ return Array.isArray(a)&&a.length>0; }
+function interpolateVectorBySpeed(spdAxis, data, simSpd){
+  if(Array.isArray(data[0])){
+    if(simSpd<=spdAxis[0]) return data[0];
+    if(simSpd>=spdAxis[spdAxis.length-1]) return data[data.length-1];
+    let i=0; while(i<spdAxis.length-1 && simSpd>spdAxis[i+1]) i++;
+    const r=(simSpd-spdAxis[i])/(spdAxis[i+1]-spdAxis[i]);
+    const row1=data[i], row2=data[i+1];
+    return row1.map((v1,k)=> v1 + r*(row2[k]-v1));
+  }else{ return data; }
+}
+function interp1(x,y,xi){
+  if(!isValid(x) || !isValid(y)) return 0;
+  if(xi<=x[0]) return y[0];
+  if(xi>=x[x.length-1]) return y[y.length-1];
+  let i=0; while(i<x.length-1 && xi>x[i+1]) i++;
+  const r=(xi-x[i])/(x[i+1]-x[i]); return y[i] + r*(y[i+1]-y[i]);
+}
+
+/* ========== Simulation Chart (Final Cmd + Upper) ========== */
+function drawSimChart(data, spd){
+  const container=document.getElementById('cont_sim'); container.innerHTML="";
+  const canvas=document.createElement('canvas'); container.appendChild(canvas);
+  new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{
+      datasets:[
+        {label:'Final Cmd', data:data.map(d=>({x:d.x,y:d.cmd})), borderColor:'#0d6efd', borderWidth:2, pointRadius:0},
+        {label:'Firewall', data:data.map(d=>({x:d.x,y:d.up })), borderColor:'#dc3545', borderDash:[5,5], borderWidth:1, pointRadius:0}
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      scales:{ x:{type:'linear', title:{display:true,text:'Angle (deg)'}},
+               y:{title:{display:true,text:'Torque (Nm)'}}},
+      plugins:{ title:{display:true, text:`Simulation @ ${spd} kph`} }
+    }
+  });
+}
+
+/* ========== Compute firewall at a single speed ========== */
+function computeFirewallAtSpeed(simSpd, offset) {
+  const spdAxis = activeData[MAP_KEYS.spd];
+  const desVelX = activeData[MAP_KEYS.desVelX];
+  const desVelY = activeData[MAP_KEYS.desVelY];
+  const gainRaw = activeData[MAP_KEYS.gain];
+  const tqRat = activeData["SysGlbPrmSysTqRat"] ?? 1.0;
+  const intLim2D = activeData['CtrldVelRtnIntgtrLimY'];
+  const hwPosScaX= activeData['CtrldVelRtnHwPosnScaX'];
+  const hwPosScaY= activeData['CtrldVelRtnHwPosnScaY'];
+  const spdOld = activeData['CtrldVelRtnVehSpdScaBilnrSeln'];
+
+  if(!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
+  if(!isValid(desVelX) || !isValid(desVelY)) throw new Error('Missing DesVelX or DesVelY');
+
+  let minAg=0, maxAg=0;
+  if (Array.isArray(desVelX[0])) {
+    minAg = Math.min(...desVelX.map(r => r[0]));
+    maxAg = Math.max(...desVelX.map(r => r[r.length-1]));
+  } else {
+    minAg = desVelX[0];
+    maxAg = desVelX[desVelX.length-1];
+  }
+  const stdAgAxis = [];
+  const step = (maxAg - minAg) / 100;
+  for (let i=0;i<=100;i++) stdAgAxis.push(minAg + step*i);
+
+  const curSpdXVector = interpolateVectorBySpeed(spdAxis, desVelX, simSpd);
+  const curSpdYVector = interpolateVectorBySpeed(spdAxis, desVelY, simSpd);
+  const desCurve = stdAgAxis.map(ag => interp1(curSpdXVector, curSpdYVector, ag));
+  const curGain = interp1(spdAxis, gainRaw, simSpd);
+  const pCurve = desCurve.map(v => v * curGain);
+
+  let iCurve = new Array(stdAgAxis.length).fill(0);
+  const Ns = Array.isArray(spdOld) ? spdOld.length : 0;
+  const Na = Array.isArray(hwPosScaX) ? hwPosScaX.length : 0;
+  if (isValid(intLim2D) && Na>0 && Ns>0 && isValid(hwPosScaY)) {
+    let mat=intLim2D;
+    let r=mat.length, c=(Array.isArray(mat[0])? mat[0].length:0);
+    if(!(r===Ns && c===Na)){
+      if(r===Na && c===Ns){ mat=transpose2D(mat); r=mat.length; c=mat[0].length; }
+    }
+    if(r===Ns && c===Na){
+      let iVecRaw=null;
+      if(simSpd<=spdOld[0]) iVecRaw=mat[0].slice();
+      else if(simSpd>=spdOld[Ns-1]) iVecRaw=mat[Ns-1].slice();
+      else{
+        let k=0; while(k<Ns-1 && simSpd>spdOld[k+1]) k++;
+        const rr=(simSpd-spdOld[k])/(spdOld[k+1]-spdOld[k]);
+        const row1=mat[k], row2=mat[k+1];
+        iVecRaw=row1.map((v1,j)=> v1 + rr*(row2[j]-v1));
+      }
+      if(iVecRaw && iVecRaw.length===Na){
+        if(hwPosScaY.length===Na){
+          const iScaled=iVecRaw.map((v,idx)=> v*hwPosScaY[idx]);
+          iCurve=stdAgAxis.map(ag=> interp1(hwPosScaX, iScaled, ag));
+        }
+      }
+    }
+  }
+
+  const results=[];
+  for(let i=0;i<stdAgAxis.length;i++){
+    const cmdRaw = pCurve[i] + iCurve[i];
+    const cmd = cmdRaw / (tqRat || 1.0);
+    results.push({ x:Number(stdAgAxis[i]), cmd:Number(cmd), up:Number(cmd + offset) });
+  }
+  return { stdAgAxis, results, curGain };
+}
+
+/* ========== Full-speed combined plot ========== */
+function drawMultiSimChart(datasets, titleText){
+  const container = document.getElementById('cont_sim_all');
+  container.innerHTML = "";
+  const canvas = document.createElement('canvas');
+  container.appendChild(canvas);
+  new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{ datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      scales:{ x:{ type:'linear', title:{display:true, text:'Angle (deg)'} },
+               y:{ title:{display:true, text:'Torque (Nm)'} } },
+      plugins:{ legend:{ display:true, position:'bottom' },
+                title:{ display:true, text: titleText || 'Firewall — Full Speed Range' } },
+      elements:{ line:{ tension:0 }, point:{ radius:0 } }
+    }
+  });
+}
+
+function runAllSpeedSim(){
+  try{
+    log("— Full‑Speed‑Range Calculation Started —");
+    const spdAxis = activeData[MAP_KEYS.spd];
+    if (!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
+    const offset = parseFloat(document.getElementById('simOffset').value);
+
+    lastAllSpeedUpper = []; // reset & fill
+    const datasets = [];
+    for (let i=0;i<spdAxis.length;i++){
+      const s = spdAxis[i];
+      const { results } = computeFirewallAtSpeed(s, offset);
+      const dataPairs = results.map(p => ({ x:p.x, y:p.up }));
+      datasets.push({
+        label: `${s} kph`,
+        data : dataPairs,
+        borderColor: `hsl(${(i/spdAxis.length)*240}, 75%, 50%)`,
+        borderWidth: 1.5,
+        pointRadius: 0
+      });
+      lastAllSpeedUpper.push({ speed: s, pairs: results.map(p=>({angle:p.x, upper:p.up})) });
+    }
+    drawMultiSimChart(datasets, 'Firewall (Upper) vs Angle — Full Speed Range');
+    log(`Full‑speed‑range calculation completed: ${spdAxis.length} speed point(s) processed; Upper curves plotted.`);
+  }catch(e){
+    log(`Error: ${e.message}`); alert(e.message);
+  }
+}
+
+/* ========== Export CSV (多速段 Upper 曲线) ========== */
+/*
+  需求：CSV 不包含单一速度 Upper 曲线；
+       直接导出“多速段全范围 Upper 曲线”。
+  输出结构：
+    [Meta]
+    ExportDate,YYYYMMDD
+    FileTitle,Return Firewall data_YYYYMMDD
+
+    [CoreData]
+    VarName,Value
+    ...
+
+    [FirewallResultMulti]
+    Speed(kph),Angle(deg),Upper(Nm)
+    s1, ang, up
+    s1, ang, up
+    s2, ang, up
+    ...
+*/
+function exportCSV(){
+  try{
+    const today = formatDateYYYYMMDD();
+    const fileTitle = `Return Firewall data_${today}`;
+
+    // 计算多速段 Upper（即使用户未手动点“Full‑Speed‑Range Calculation”，这里也自动计算，确保导出的一致性）
+    const spdAxis = activeData[MAP_KEYS.spd];
+    if(!isValid(spdAxis)) throw new Error('Missing VelSpdTbl');
+    const offset = parseFloat(document.getElementById('simOffset').value);
+
+    // 本地生成（同时刷新 lastAllSpeedUpper 以保持 UI 状态一致）
+    lastAllSpeedUpper = [];
+    for (let i=0;i<spdAxis.length;i++){
+      const s = spdAxis[i];
+      const { results } = computeFirewallAtSpeed(s, offset);
+      lastAllSpeedUpper.push({ speed: s, pairs: results.map(p=>({angle:p.x, upper:p.up})) });
+    }
+
+    let c = "";
+    // Meta
+    c += "[Meta]\n";
+    c += `ExportDate,${today}\n`;
+    c += `FileTitle,${fileTitle}\n\n`;
+
+    // CoreData
+    c += "[CoreData]\n";
+    c += "VarName,Value\n";
+    CORE_VARS.forEach(k=>{
+      let v=activeData[k]; let s="";
+      if(v===null || typeof v==='undefined'){ s=""; }
+      else if(typeof v==='number'){ s=String(v); }
+      else { try{s=JSON.stringify(v);}catch(e){s=String(v);} }
+      if(s.includes(',') || s.includes('"') || s.includes('\n')){ s='"'+s.replace(/"/g,'""')+'"'; }
+      c += `${k},${s}\n`;
+    });
+
+    // 多速段 Upper 结果
+    c += "\n[FirewallResultMulti]\n";
+    c += "Speed(kph),Angle(deg),Upper(Nm)\n";
+    lastAllSpeedUpper.forEach(row=>{
+      row.pairs.forEach(p=>{
+        c += `${row.speed},${Number(p.angle).toFixed(2)},${Number(p.upper).toFixed(4)}\n`;
+      });
+    });
+
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([c],{type:'text/csv'}));
+    a.download=`${fileTitle}.csv`;
+    a.click();
+    log(`CSV exported with multi-speed Upper curves only: ${a.download}`);
+  }catch(e){
+    log(`Error: ${e.message}`); alert(e.message);
+  }
+}
+
+/* ========== Run calc (CALIB‑ALIGNED; Upper only) ========== */
+function runSafeSim(){
+  try{
+    log("— Start Calculation (CALIB‑ALIGNED: No unified limit; Firewall = cmd+offset; Upper only) —");
+    const simSpd = parseFloat(document.getElementById('simSpeed').value);
+    const offset = parseFloat(document.getElementById('simOffset').value);
+    const { results, curGain } = computeFirewallAtSpeed(simSpd, offset);
+    lastSimResults = results.slice();  // 仅用于单速图显示（不再写入 CSV）
+    drawSimChart(lastSimResults, simSpd);
+    log(`SimSpeed=${simSpd}, Gain=${curGain?.toFixed?.(3)} — Calculation complete (limits removed; Firewall = cmd+offset; Lower not output).`);
+  }catch(e){
+    log(`Error: ${e.message}`); alert(e.message);
+  }
+}
+</script>
+</body>
+</html>
+``
